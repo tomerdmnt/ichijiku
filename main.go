@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/codegangsta/cli"
 	"gopkg.in/yaml.v1"
@@ -16,9 +17,11 @@ import (
 
 var (
 	services []service
+	daemon bool
 )
 
 func before(c *cli.Context) error {
+	daemon = c.Bool("d")
 	serviceMap, err := parseFile(c.GlobalString("file"))
 	if err != nil {
 		log.Println(err)
@@ -62,6 +65,9 @@ func psCmd(c *cli.Context) {
 	if err := cmd.Start(); err != nil {
 		log.Fatal(err)
 	}
+	w := new(tabwriter.Writer)
+	w.Init(os.Stdout, 0, 8, 2, '\t', 0)
+	fmt.Fprintln(w, "NAME\tCOMMAND\tSTATE\tPORTS")
 	scanner := bufio.NewScanner(stdout)
 	r := regexp.MustCompile("\\s{2,}")
 	for scanner.Scan() {
@@ -76,20 +82,21 @@ func psCmd(c *cli.Context) {
 		}
 		for _, s := range services {
 			if s.matchContainer(name) {
-				fmt.Printf("%s\t\t%s\t\t\t\t%s\t\t%s\n", name, command, state, ports)
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t\n", name, command, state, ports)
 				break
 			}
 		}
 	}
+	w.Flush()
 }
 
 func logsCmd(c *cli.Context) {
 }
 
 func upCmd(c *cli.Context) {
+	log.Println(c.Bool("daemon"))
+	verbose := c.GlobalBool("verbose")
 	for _, s := range services {
-		daemon := c.GlobalBool("d")
-		verbose := c.GlobalBool("verbose")
 		if err := s.rm(verbose); err != nil {
 			log.Fatal(err)
 		}
@@ -149,8 +156,13 @@ func main() {
 		{
 			Name:   "up",
 			Usage:  "Build, (re)create, start and attach to containers for a service.",
-			Before: before,
 			Action: upCmd,
+			Flags: []cli.Flag{
+				cli.BoolFlag{
+					Name:  "d",
+					Usage: "Detached mode: Run containers in the background",
+				},
+			},
 		},
 	}
 	app.Run(os.Args)

@@ -35,7 +35,7 @@ func (s *service) init(name string) {
 }
 
 func (s *service) buildCmd(verbose bool) error {
-	if s.Image == "" {
+	if s.Image != "" {
 		fmt.Printf("%s uses image, skipping...\n", s.name)
 		return nil
 	}
