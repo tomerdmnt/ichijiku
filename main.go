@@ -261,10 +261,10 @@ func main() {
 			Action: createAction(rmCmd),
 		},
 		{
-			Name:   "scale",
-			Usage:  "Set number of containers to run for a service.",
+			Name:        "scale",
+			Usage:       "Set number of containers to run for a service.",
 			Description: "$ ichijiku scale web=3 db=2",
-			Action: scaleCmd,
+			Action:      scaleCmd,
 		},
 		{
 			Name:   "start",
