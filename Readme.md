@@ -3,7 +3,7 @@
 
 Docker orchestration tool compatible with [fig](http://www.fig.sh) written in Go
 
-Uses the docker cli client instead of the docker remote api in order to have access to all the latest features
+Uses the docker command line client instead of the docker remote api in order to have access to all the latest features
 
 ## install
 
