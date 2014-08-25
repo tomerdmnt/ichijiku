@@ -78,6 +78,22 @@ func rmCmd(services []*service, c *cli.Context) {
 	}
 }
 
+func startCmd(services []*service, c *cli.Context) {
+	for _, s := range services {
+		if err := s.start(c.GlobalBool("verbose")); err != nil {
+			log.Fatal(err)
+		}
+	}
+}
+
+func stopCmd(services []*service, c *cli.Context) {
+	for _, s := range services {
+		if err := s.stop(c.GlobalBool("verbose")); err != nil {
+			log.Fatal(err)
+		}
+	}
+}
+
 func scaleCmd(c *cli.Context) {
 	serviceMap, err := parseFile(c.GlobalString("file"))
 	if err != nil {
@@ -235,6 +251,16 @@ func main() {
 			Name:   "scale",
 			Usage:  "Set number of containers to run for a service.",
 			Action: scaleCmd,
+		},
+		{
+			Name: "start",
+			Usage: "Start existing containers.",
+			Action: createAction(startCmd),
+		},
+		{
+			Name: "stop",
+			Usage: "Stop existing containers.",
+			Action: createAction(stopCmd),
 		},
 	}
 	app.Run(os.Args)

@@ -74,6 +74,24 @@ func (c *container) run(logsCh chan<- string, cp *colorPicker, daemon, verbose b
 	return nil
 }
 
+func (c *container) start(verbose bool) error {
+	cmd := exec.Command("docker", "start", c.name)
+	if verbose {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+	return cmd.Run()
+}
+
+func (c *container) stop(verbose bool) error {
+	cmd := exec.Command("docker", "stop", c.name)
+	if verbose {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+	return cmd.Run()
+}
+
 func (c *container) logs(ch chan<- string, cp *colorPicker, timestamps, verbose bool) error {
 	args := []string{"logs", "-f"}
 	if timestamps {

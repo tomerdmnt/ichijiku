@@ -72,6 +72,26 @@ func (s *service) run(logsCh chan<- string, cp *colorPicker, daemon, verbose boo
 	return nil
 }
 
+func (s *service) start(verbose bool) error {
+	for _, c := range s.containers {
+		fmt.Printf("starting %s\n", c.name)
+		if err := c.start(verbose); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *service) stop(verbose bool) error {
+	for _, c := range s.containers {
+		fmt.Printf("stopping %s\n", c.name)
+		if err := c.stop(verbose); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *service) logs(ch chan<- string, cp *colorPicker, timestamps, verbose bool) (int, error) {
 	count := 0
 	for _, c := range s.containers {
@@ -89,7 +109,7 @@ func (s *service) scale(n int, verbose bool) error {
 	addContainer := func(i int) error {
 		c := newContainer(s, i)
 		s.containers = append(s.containers, c)
-		fmt.Printf("starting %s...\n", c.name)
+		fmt.Printf("creating %s...\n", c.name)
 		err := c.run(nil, nil, true, verbose)
 		if err != nil {
 			return err
@@ -121,7 +141,7 @@ func (s *service) scale(n int, verbose bool) error {
 		// remove containers
 	} else if n < len(s.containers) {
 		for _, c := range s.containers[n:] {
-			fmt.Printf("stopping %s...\n", c.name)
+			fmt.Printf("removing %s...\n", c.name)
 			c.rmf(verbose)
 		}
 	}
