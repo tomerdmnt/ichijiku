@@ -261,7 +261,10 @@ func main() {
 		},
 		{
 			Name:   "scale",
-			Usage:  "Set number of containers to run for a service.",
+			Usage:  `Set number of containers to run for a service.
+   For example:
+
+	$ ichijiku scale web=3 db=2`,
 			Action: scaleCmd,
 		},
 		{

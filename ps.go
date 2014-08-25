@@ -43,6 +43,9 @@ func ps(ch chan<- *psData, verbose bool) error {
 				}
 			} else if len(fields) == 6 {
 				d.name = fields[5]
+				if fields[5] == "" {
+					d.name = fields[4]
+				}
 			} else {
 				continue
 			}
