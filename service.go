@@ -9,18 +9,27 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 type service struct {
-	name           string
-	namespace      string
-	Build          string            `yaml:"build"`
-	Command        string            `yaml:"command"`
-	Image          string            `yaml:"image"`
-	Ports          []string          `yaml:"ports"`
-	Links          []string          `yaml:"links"`
-	Environment    map[string]string `yaml:"environment"`
-	Volumes        []string          `yaml:"volumes"`
+	name        string
+	namespace   string
+	Build       string            `yaml:"build"`
+	Command     string            `yaml:"command"`
+	Image       string            `yaml:"image"`
+	Ports       []string          `yaml:"ports"`
+	Links       []string          `yaml:"links"`
+	Environment map[string]string `yaml:"environment"`
+	Volumes     []string          `yaml:"volumes"`
+	Net         string            `yaml:"net"`
+	Entrypoint  string            `yaml:"entrypoint"`
+	Hostname    string            `yaml:"hostname"`
+	User        string            `yaml:"user"`
+	MemLimit    string            `yaml:"mem_limit"`
+	Privileged  string            `yaml:"privileged"`
+	Workdir     string            `yaml:"working_dir"`
+
 	containerRe    *regexp.Regexp
 	containers     []*container
 	linkedServices []*link
@@ -33,12 +42,18 @@ type link struct {
 
 // init fields not found in the yaml file
 func (s *service) init(name string, serviceMap map[string]*service) {
+	s.name = name
 	dir, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
 	}
-	s.name = name
-	s.namespace = strings.Replace(path.Base(dir), "-", "", -1)
+	base := path.Base(dir)
+	// escape namespace
+	for _, r := range base {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
+			s.namespace += string(r)
+		}
+	}
 	s.containerRe = regexp.MustCompile(fmt.Sprintf("%s_%s_\\d+", s.namespace, s.name))
 	s.containers = []*container{}
 
@@ -92,7 +107,7 @@ func (s *service) run(logsCh chan<- string, cp *colorPicker, daemon, verbose boo
 
 func (s *service) start(verbose bool) error {
 	for _, c := range s.containers {
-		fmt.Printf("starting %s\n", c.name)
+		fmt.Printf("starting %s...\n", c.name)
 		if err := c.start(verbose); err != nil {
 			return err
 		}
@@ -102,8 +117,18 @@ func (s *service) start(verbose bool) error {
 
 func (s *service) stop(verbose bool) error {
 	for _, c := range s.containers {
-		fmt.Printf("stopping %s\n", c.name)
+		fmt.Printf("stopping %s...\n", c.name)
 		if err := c.stop(verbose); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *service) kill(verbose bool) error {
+	for _, c := range s.containers {
+		fmt.Printf("killiing %s...\n", c.name)
+		if err := c.kill(verbose); err != nil {
 			return err
 		}
 	}

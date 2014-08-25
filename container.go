@@ -84,6 +84,15 @@ func (c *container) stop(verbose bool) error {
 	return cmd.Run()
 }
 
+func (c *container) kill(verbose bool) error {
+	cmd := exec.Command("docker", "kill", c.name)
+	if verbose {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+	return cmd.Run()
+}
+
 func (c *container) logs(ch chan<- string, cp *colorPicker, timestamps, verbose bool) error {
 	args := []string{"logs", "-f"}
 	if timestamps {
@@ -150,6 +159,20 @@ func (c *container) buildRunCmd() (*exec.Cmd, error) {
 	} else {
 		args = append(args, c.service.Image)
 	}
+
+	addStringFlag := func(flag, value string) {
+		if value != "" {
+			args = append(args, fmt.Sprintf("--%s=%s", flag, value))
+		}
+	}
+	addStringFlag("net", c.service.Net)
+	addStringFlag("workdir", c.service.Workdir)
+	addStringFlag("entrypoint", c.service.Entrypoint)
+	addStringFlag("hostname", c.service.Hostname)
+	addStringFlag("user", c.service.User)
+	addStringFlag("memory", c.service.MemLimit)
+	addStringFlag("privileged", c.service.Privileged)
+
 	words, err := shellquote.Split(c.service.Command)
 	if err != nil {
 		return nil, err

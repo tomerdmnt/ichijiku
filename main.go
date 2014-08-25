@@ -97,6 +97,14 @@ func stopCmd(services []*service, c *cli.Context) {
 	}
 }
 
+func killCmd(services []*service, c *cli.Context) {
+	for _, s := range services {
+		if err := s.kill(c.GlobalBool("verbose")); err != nil {
+			log.Fatal(err)
+		}
+	}
+}
+
 func scaleCmd(c *cli.Context) {
 	serviceMap, err := parseFile(c.GlobalString("file"))
 	if err != nil {
@@ -105,6 +113,25 @@ func scaleCmd(c *cli.Context) {
 	for name, s := range serviceMap {
 		s.init(name, serviceMap)
 	}
+
+	// populate service containers
+	psCh := make(chan *psData)
+	if err := ps(psCh, c.GlobalBool("verbose")); err != nil {
+		log.Fatal(err)
+	}
+	for psdata := range psCh {
+		for _, s := range serviceMap {
+			if s.matchContainer(psdata.name) {
+				cntr, err := newContainerFromPsData(s, psdata)
+				if err != nil {
+					log.Fatal(err)
+				}
+				s.containers = append(s.containers, cntr)
+				break
+			}
+		}
+	}
+
 	for _, arg := range c.Args() {
 		fields := strings.Split(arg, "=")
 		name := fields[0]
@@ -115,24 +142,6 @@ func scaleCmd(c *cli.Context) {
 		s, ok := serviceMap[name]
 		if !ok {
 			log.Fatalf("%s: service does not exist", name)
-		}
-
-		// populate service containers
-		psCh := make(chan *psData)
-		if err := ps(psCh, c.GlobalBool("verbose")); err != nil {
-			log.Fatal(err)
-		}
-		for psdata := range psCh {
-			for _, s := range serviceMap {
-				if s.matchContainer(psdata.name) {
-					cntr, err := newContainerFromPsData(s, psdata)
-					if err != nil {
-						log.Fatal(err)
-					}
-					s.containers = append(s.containers, cntr)
-					break
-				}
-			}
 		}
 
 		err = s.scale(n, c.GlobalBool("verbose"))
@@ -264,6 +273,11 @@ func main() {
 			Name:   "stop",
 			Usage:  "Stop existing containers.",
 			Action: createAction(stopCmd),
+		},
+		{
+			Name:   "kill",
+			Usage:  "Force stop service containers.",
+			Action: createAction(killCmd),
 		},
 	}
 	app.Run(os.Args)
