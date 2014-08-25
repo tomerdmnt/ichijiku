@@ -210,6 +210,7 @@ func main() {
 	app.Name = "ichijiku"
 	app.Usage = "fig like docker orchestration"
 	app.EnableBashCompletion = true
+	app.Version = "0.0.1"
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:  "file, f",
