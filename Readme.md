@@ -31,9 +31,6 @@ COMMANDS:
    up		Build, (re)create, start and attach to containers for a service.
    rm		Remove all service containers.
    scale	Set number of containers to run for a service.
-   For example:
-
-		$ ichijiku scale web=3 db=2
    start	Start existing containers.
    stop		Stop existing containers.
    kill		Force stop service containers.
