@@ -69,6 +69,13 @@ db:
     - "5984"
   volumes:
 	- /local/path:/container/path
+  run_flags: --restart=always
+```
+
+supports latest docker run features using run_flags yaml field
+
+```yml
+  run_flags: --restart=always
 ```
 
 [additional info](http://www.fig.sh/yml.html)

@@ -29,6 +29,7 @@ type service struct {
 	MemLimit    string            `yaml:"mem_limit"`
 	Privileged  string            `yaml:"privileged"`
 	Workdir     string            `yaml:"working_dir"`
+	RunFlags    string            `yaml:"run_flags"`
 
 	containerRe    *regexp.Regexp
 	containers     []*container

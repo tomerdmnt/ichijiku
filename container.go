@@ -154,6 +154,13 @@ func (c *container) buildRunCmd() (*exec.Cmd, error) {
 			args = append(args, arg)
 		}
 	}
+	if c.service.RunFlags != "" {
+		words, err := shellquote.Split(c.service.RunFlags)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, words...)
+	}
 	if c.service.Image == "" {
 		args = append(args, c.service.String())
 	} else {
