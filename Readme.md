@@ -11,6 +11,8 @@ Uses the docker command line client instead of the docker remote api in order to
  $ go get github.com/tomerdmnt/ichijiku
 ```
 
+[binaries](releases)
+
 ## Usage
 ```bash
  $ ichijiku -h
