@@ -1,6 +1,7 @@
 package main
 
 import (
+	"container/ring"
 	"sync"
 
 	"github.com/mgutz/ansi"
@@ -8,7 +9,7 @@ import (
 
 type colorPicker struct {
 	colors []string
-	i      int
+	it     *ring.Ring
 	mutex  sync.Mutex
 }
 
@@ -20,18 +21,19 @@ func newColorPicker() *colorPicker {
 		cp.colors = append(cp.colors, ansi.ColorCode(c))
 	}
 	cp.mutex = sync.Mutex{}
-	cp.i = 0
+	cp.it = ring.New(len(cp.colors))
+	for i := 0; i < cp.it.Len(); i++ {
+		cp.it.Value = cp.colors[i]
+		cp.it = cp.it.Next()
+	}
 	return cp
 }
 
 func (cp *colorPicker) next() string {
 	cp.mutex.Lock()
 	defer cp.mutex.Unlock()
-	if cp.i >= len(cp.colors) {
-		cp.i = 0
-	}
-	color := cp.colors[cp.i]
-	cp.i += 1
+	color, _ := cp.it.Value.(string)
+	cp.it = cp.it.Next()
 	return color
 }
 

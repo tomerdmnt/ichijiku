@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -60,6 +61,8 @@ func upCmd(services []*service, c *cli.Context) {
 	if !daemon {
 		logsCh = make(chan string)
 	}
+
+	sort.Sort(ByServiceDependency(services))
 	for _, s := range services {
 		if err := s.run(logsCh, cp, daemon, verbose); err != nil {
 			log.Fatal(err)
@@ -100,7 +103,7 @@ func scaleCmd(c *cli.Context) {
 		log.Fatal(err)
 	}
 	for name, s := range serviceMap {
-		s.init(name)
+		s.init(name, serviceMap)
 	}
 	for _, arg := range c.Args() {
 		fields := strings.Split(arg, "=")
@@ -160,7 +163,7 @@ func createAction(action func([]*service, *cli.Context)) func(*cli.Context) {
 		services := []*service{}
 		if len(c.Args()) == 0 {
 			for name, s := range serviceMap {
-				s.init(name)
+				s.init(name, serviceMap)
 				services = append(services, s)
 			}
 		} else {
@@ -169,7 +172,7 @@ func createAction(action func([]*service, *cli.Context)) func(*cli.Context) {
 				if !ok {
 					log.Fatalf("%s: service does not exist", name)
 				}
-				s.init(name)
+				s.init(name, serviceMap)
 				services = append(services, s)
 			}
 		}
@@ -253,13 +256,13 @@ func main() {
 			Action: scaleCmd,
 		},
 		{
-			Name: "start",
-			Usage: "Start existing containers.",
+			Name:   "start",
+			Usage:  "Start existing containers.",
 			Action: createAction(startCmd),
 		},
 		{
-			Name: "stop",
-			Usage: "Stop existing containers.",
+			Name:   "stop",
+			Usage:  "Stop existing containers.",
 			Action: createAction(stopCmd),
 		},
 	}

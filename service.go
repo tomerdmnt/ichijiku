@@ -12,21 +12,27 @@ import (
 )
 
 type service struct {
-	name        string
-	namespace   string
-	Build       string            `yaml:"build"`
-	Command     string            `yaml:"command"`
-	Image       string            `yaml:"image"`
-	Ports       []string          `yaml:"ports"`
-	Links       []string          `yaml:"links"`
-	Environment map[string]string `yaml:"environment"`
-	Volumes     []string          `yaml:"volumes"`
-	containerRe *regexp.Regexp
-	containers  []*container
+	name           string
+	namespace      string
+	Build          string            `yaml:"build"`
+	Command        string            `yaml:"command"`
+	Image          string            `yaml:"image"`
+	Ports          []string          `yaml:"ports"`
+	Links          []string          `yaml:"links"`
+	Environment    map[string]string `yaml:"environment"`
+	Volumes        []string          `yaml:"volumes"`
+	containerRe    *regexp.Regexp
+	containers     []*container
+	linkedServices []*link
+}
+
+type link struct {
+	alias   string
+	service *service
 }
 
 // init fields not found in the yaml file
-func (s *service) init(name string) {
+func (s *service) init(name string, serviceMap map[string]*service) {
 	dir, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
@@ -35,6 +41,18 @@ func (s *service) init(name string) {
 	s.namespace = strings.Replace(path.Base(dir), "-", "", -1)
 	s.containerRe = regexp.MustCompile(fmt.Sprintf("%s_%s_\\d+", s.namespace, s.name))
 	s.containers = []*container{}
+
+	s.linkedServices = []*link{}
+	for _, l := range s.Links {
+		fields := strings.Split(l, ":")
+		link := &link{}
+		link.alias = fields[len(fields)-1]
+		linkedService, ok := serviceMap[fields[0]]
+		if ok {
+			link.service = linkedService
+			s.linkedServices = append(s.linkedServices, link)
+		}
+	}
 }
 
 func (s *service) build(verbose bool) error {
@@ -162,4 +180,28 @@ func (s *service) matchContainer(container string) bool {
 
 func (s *service) String() string {
 	return s.namespace + "/" + s.name
+}
+
+func (s *service) isLinked(s2 *service) bool {
+	for _, l := range s.linkedServices {
+		if l.service == s2 {
+			return true
+		}
+	}
+	return false
+}
+
+// sort services by linked dependencies
+type ByServiceDependency []*service
+
+func (s ByServiceDependency) Len() int {
+	return len(s)
+}
+
+func (s ByServiceDependency) Less(i, j int) bool {
+	return !s[i].isLinked(s[j])
+}
+
+func (s ByServiceDependency) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
 }

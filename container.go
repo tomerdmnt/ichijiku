@@ -43,22 +43,9 @@ func newContainerFromPsData(s *service, psd *psData) (*container, error) {
 }
 
 func (c *container) run(logsCh chan<- string, cp *colorPicker, daemon, verbose bool) error {
-	cmd, err := c.buildRunCmd(daemon)
+	cmd, err := c.buildRunCmd()
 	if err != nil {
 		return err
-	}
-	if !daemon {
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			return err
-		}
-		stderr, err := cmd.StderrPipe()
-		if err != nil {
-			return err
-		}
-		stdouterr := io.MultiReader(stdout, stderr)
-		logsprefix := fmt.Sprintf("%s_%d", c.service.name, c.index)
-		go processLogs(logsprefix, stdouterr, logsCh, cp)
 	}
 	c.rmf(verbose)
 	if verbose {
@@ -68,8 +55,13 @@ func (c *container) run(logsCh chan<- string, cp *colorPicker, daemon, verbose b
 			cmd.Stderr = os.Stderr
 		}
 	}
-	if err := cmd.Start(); err != nil {
+	if err := cmd.Run(); err != nil {
 		return err
+	}
+	if !daemon {
+		if err := c.logs(logsCh, cp, false, verbose); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -131,11 +123,8 @@ func processLogs(name string, r io.Reader, ch chan<- string, cp *colorPicker) {
 	}
 }
 
-func (c *container) buildRunCmd(daemon bool) (*exec.Cmd, error) {
-	args := []string{"run"}
-	if daemon {
-		args = append(args, "-d")
-	}
+func (c *container) buildRunCmd() (*exec.Cmd, error) {
+	args := []string{"run", "-d"}
 	args = append(args, fmt.Sprintf("--name=%s", c.name))
 	for _, v := range c.service.Volumes {
 		args = append(args, fmt.Sprintf("--volume=%s", v))
@@ -145,6 +134,16 @@ func (c *container) buildRunCmd(daemon bool) (*exec.Cmd, error) {
 	}
 	for env, val := range c.service.Environment {
 		args = append(args, fmt.Sprintf("--env=\"%s=%s\"", env, val))
+	}
+	// link each container of the linked service
+	for _, link := range c.service.linkedServices {
+		for _, linkedContainer := range link.service.containers {
+			arg := fmt.Sprintf("--link=%s:%s_%d",
+				linkedContainer.name,
+				link.alias,
+				linkedContainer.index)
+			args = append(args, arg)
+		}
 	}
 	if c.service.Image == "" {
 		args = append(args, c.service.String())
