@@ -5,53 +5,54 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/codegangsta/cli"
 	"gopkg.in/yaml.v1"
 )
 
-func buildCmd(services []service, c *cli.Context) {
+func buildCmd(services []*service, c *cli.Context) {
 	for _, s := range services {
-		if err := s.buildCmd(c.GlobalBool("verbose")); err != nil {
+		if err := s.build(c.GlobalBool("verbose")); err != nil {
 			log.Fatal(err)
 		}
 	}
 }
 
-func psCmd(services []service, c *cli.Context) {
-	containers := make(chan container)
-	if err := ps(containers); err != nil {
-		log.Fatal(err)
-	}
-
+func psCmd(services []*service, c *cli.Context) {
 	w := new(tabwriter.Writer)
 	w.Init(os.Stdout, 0, 8, 2, '\t', 0)
 	fmt.Fprintln(w, "NAME\tCOMMAND\tSTATE\tPORTS")
-
-	for c := range containers {
-		for _, s := range services {
-			if s.matchContainer(c.name) {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t\n", c.name, c.command, c.status, c.ports)
-				break
-			}
+	for _, s := range services {
+		for _, cntr := range s.containers {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t\n",
+				cntr.name, cntr.command, cntr.status, cntr.ports)
 		}
 	}
 	w.Flush()
 }
 
-func logsCmd(services []service, c *cli.Context) {
+func logsCmd(services []*service, c *cli.Context) {
 	ch := make(chan string)
 	cp := newColorPicker()
+	total := 0
 	for _, s := range services {
-		s.logs(ch, cp, c.GlobalBool("verbose"))
+		count, err := s.logs(ch, cp, c.Bool("timestamps"), c.GlobalBool("verbose"))
+		if err != nil {
+			log.Fatal(err)
+		}
+		total += count
 	}
-	for line := range ch {
-		fmt.Println(line)
+	if total > 0 {
+		for line := range ch {
+			fmt.Println(line)
+		}
 	}
 }
 
-func upCmd(services []service, c *cli.Context) {
+func upCmd(services []*service, c *cli.Context) {
 	daemon := c.Bool("d")
 	verbose := c.GlobalBool("verbose")
 	cp := newColorPicker()
@@ -60,10 +61,7 @@ func upCmd(services []service, c *cli.Context) {
 		logsCh = make(chan string)
 	}
 	for _, s := range services {
-		if err := s.rm(verbose); err != nil {
-			log.Fatal(err)
-		}
-		if err := s.runCmd(logsCh, cp, daemon, verbose); err != nil {
+		if err := s.run(logsCh, cp, daemon, verbose); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -74,25 +72,76 @@ func upCmd(services []service, c *cli.Context) {
 	}
 }
 
-func parseFile(file string) (map[string]service, error) {
+func rmCmd(services []*service, c *cli.Context) {
+	for _, s := range services {
+		s.rmf(c.GlobalBool("verbose"))
+	}
+}
+
+func scaleCmd(c *cli.Context) {
+	serviceMap, err := parseFile(c.GlobalString("file"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	for name, s := range serviceMap {
+		s.init(name)
+	}
+	for _, arg := range c.Args() {
+		fields := strings.Split(arg, "=")
+		name := fields[0]
+		n, err := strconv.Atoi(fields[1])
+		if err != nil {
+			log.Fatal(err)
+		}
+		s, ok := serviceMap[name]
+		if !ok {
+			log.Fatalf("%s: service does not exist", name)
+		}
+
+		// populate service containers
+		psCh := make(chan *psData)
+		if err := ps(psCh, c.GlobalBool("verbose")); err != nil {
+			log.Fatal(err)
+		}
+		for psdata := range psCh {
+			for _, s := range serviceMap {
+				if s.matchContainer(psdata.name) {
+					cntr, err := newContainerFromPsData(s, psdata)
+					if err != nil {
+						log.Fatal(err)
+					}
+					s.containers = append(s.containers, cntr)
+					break
+				}
+			}
+		}
+
+		err = s.scale(n, c.GlobalBool("verbose"))
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+}
+
+func parseFile(file string) (map[string]*service, error) {
 	buf, err := ioutil.ReadFile(file)
 	if err != nil {
 		return nil, err
 	}
-	m := make(map[string]service)
+	m := make(map[string]*service)
 	if err := yaml.Unmarshal(buf, &m); err != nil {
 		return nil, err
 	}
 	return m, nil
 }
 
-func createAction(action func([]service, *cli.Context)) func(*cli.Context) {
+func createAction(action func([]*service, *cli.Context)) func(*cli.Context) {
 	return func(c *cli.Context) {
 		serviceMap, err := parseFile(c.GlobalString("file"))
 		if err != nil {
 			log.Fatal(err)
 		}
-		services := []service{}
+		services := []*service{}
 		if len(c.Args()) == 0 {
 			for name, s := range serviceMap {
 				s.init(name)
@@ -106,6 +155,22 @@ func createAction(action func([]service, *cli.Context)) func(*cli.Context) {
 				}
 				s.init(name)
 				services = append(services, s)
+			}
+		}
+		psCh := make(chan *psData)
+		if err := ps(psCh, c.GlobalBool("verbose")); err != nil {
+			log.Fatal(err)
+		}
+		for psdata := range psCh {
+			for _, s := range services {
+				if s.matchContainer(psdata.name) {
+					cntr, err := newContainerFromPsData(s, psdata)
+					if err != nil {
+						log.Fatal(err)
+					}
+					s.containers = append(s.containers, cntr)
+					break
+				}
 			}
 		}
 		action(services, c)
@@ -143,6 +208,12 @@ func main() {
 			Name:   "logs",
 			Usage:  "View output from containers",
 			Action: createAction(logsCmd),
+			Flags: []cli.Flag{
+				cli.BoolFlag{
+					Name:  "timestamps, t",
+					Usage: "Show timestamps",
+				},
+			},
 		},
 		{
 			Name:   "up",
@@ -154,6 +225,16 @@ func main() {
 					Usage: "Detached mode: Run containers in the background",
 				},
 			},
+		},
+		{
+			Name:   "rm",
+			Usage:  "Remove all service containers.",
+			Action: createAction(rmCmd),
+		},
+		{
+			Name:   "scale",
+			Usage:  "Set number of containers to run for a service.",
+			Action: scaleCmd,
 		},
 	}
 	app.Run(os.Args)

@@ -1,23 +1,15 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
-	"sync"
-
-	"github.com/kballard/go-shellquote"
 )
-
-var colors []string = []string{"cyan", "yellow", "green", "magenta", "blue", "red"}
-var colori int = 0
-var colorMutex sync.Mutex = sync.Mutex{}
 
 type service struct {
 	name        string
@@ -30,6 +22,7 @@ type service struct {
 	Environment map[string]string `yaml:"environment"`
 	Volumes     []string          `yaml:"volumes"`
 	containerRe *regexp.Regexp
+	containers  []*container
 }
 
 // init fields not found in the yaml file
@@ -41,9 +34,10 @@ func (s *service) init(name string) {
 	s.name = name
 	s.namespace = strings.Replace(path.Base(dir), "-", "", -1)
 	s.containerRe = regexp.MustCompile(fmt.Sprintf("%s_%s_\\d+", s.namespace, s.name))
+	s.containers = []*container{}
 }
 
-func (s *service) buildCmd(verbose bool) error {
+func (s *service) build(verbose bool) error {
 	if s.Image != "" {
 		fmt.Printf("%s uses image, skipping...\n", s.name)
 		return nil
@@ -61,110 +55,83 @@ func (s *service) buildCmd(verbose bool) error {
 	return nil
 }
 
-func (s *service) rm(verbose bool) error {
-	name := fmt.Sprintf("%s_%s_%d", s.namespace, s.name, 1)
-	cmd := exec.Command("docker", "rm", "-f", name)
-	if verbose {
-		fmt.Printf("%s\n", strings.Trim(fmt.Sprint(cmd.Args), "[]"))
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+func (s *service) run(logsCh chan<- string, cp *colorPicker, daemon, verbose bool) error {
+	logfmt := "recreating %s...\n"
+	if len(s.containers) == 0 {
+		c := newContainer(s, 1)
+		s.containers = append(s.containers, c)
+		logfmt = "creating %s...\n"
 	}
-	cmd.Run()
-	return nil
-}
-
-func (s *service) runCmd(logsCh chan<- string, cp *colorPicker, daemon, verbose bool) error {
-	name := fmt.Sprintf("%s_%s_%d", s.namespace, s.name, 1)
-	args := []string{"run"}
-	if daemon {
-		args = append(args, "-d")
-	}
-	args = append(args, fmt.Sprintf("--name=%s", name))
-	for _, v := range s.Volumes {
-		args = append(args, fmt.Sprintf("--volume=%s", v))
-	}
-	for _, p := range s.Ports {
-		args = append(args, fmt.Sprintf("--publish=%s", p))
-	}
-	for env, val := range s.Environment {
-		args = append(args, fmt.Sprintf("--env=\"%s=%s\"", env, val))
-	}
-	if s.Image == "" {
-		args = append(args, s.String())
-	} else {
-		args = append(args, s.Image)
-	}
-	words, err := shellquote.Split(s.Command)
-	if err != nil {
-		return err
-	}
-	args = append(args, words...)
-
-	cmd := exec.Command("docker", args...)
-	if !daemon {
-		stdout, err := cmd.StdoutPipe()
+	for _, c := range s.containers {
+		fmt.Printf(logfmt, c.name)
+		err := c.run(logsCh, cp, daemon, verbose)
 		if err != nil {
 			return err
 		}
-		stderr, err := cmd.StderrPipe()
+	}
+	return nil
+}
+
+func (s *service) logs(ch chan<- string, cp *colorPicker, timestamps, verbose bool) (int, error) {
+	count := 0
+	for _, c := range s.containers {
+		err := c.logs(ch, cp, timestamps, verbose)
+		if err != nil {
+			return count, err
+		}
+		count++
+	}
+	return count, nil
+}
+
+func (s *service) scale(n int, verbose bool) error {
+	sort.Sort(ByIndex(s.containers))
+	addContainer := func(i int) error {
+		c := newContainer(s, i)
+		s.containers = append(s.containers, c)
+		fmt.Printf("starting %s...\n", c.name)
+		err := c.run(nil, nil, true, verbose)
 		if err != nil {
 			return err
 		}
-		stdouterr := io.MultiReader(stdout, stderr)
-		go processLogs(name, stdouterr, logsCh, cp)
+		return nil
 	}
-	if verbose {
-		fmt.Printf("%s\n", strings.Trim(fmt.Sprint(cmd.Args), "[]"))
-		if daemon {
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
+
+	// add containers
+	if n > len(s.containers) {
+		left := n - len(s.containers)
+		offset := 0
+		for i, c := range s.containers {
+			if i+1+offset != c.index {
+				offset++
+				if err := addContainer(i + 1); err != nil {
+					return err
+				}
+				left -= 1
+				if left <= 0 {
+					return nil
+				}
+			}
 		}
-	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (s *service) logs(ch chan<- string, cp *colorPicker, verbose bool) error {
-	containers := make(chan container)
-	ps(containers)
-
-	for c := range containers {
-		if s.matchContainer(c.name) {
-			cmd := exec.Command("docker", "logs", "-t", "-f", c.name)
-			stdout, err := cmd.StdoutPipe()
-			if err != nil {
-				// TODO: cancel goroutine
+		for i := len(s.containers); left > 0; i, left = i+1, left-1 {
+			if err := addContainer(i + 1); err != nil {
 				return err
 			}
-			stderr, err := cmd.StderrPipe()
-			if err != nil {
-				// TODO: cancel goroutine
-				return err
-			}
-			if verbose {
-				fmt.Printf("%s\n", strings.Trim(fmt.Sprint(cmd.Args), "[]"))
-			}
-			if err := cmd.Start(); err != nil {
-				return err
-			}
-
-			stdouterr := io.MultiReader(stdout, stderr)
-			go processLogs(c.name, stdouterr, ch, cp)
+		}
+		// remove containers
+	} else if n < len(s.containers) {
+		for _, c := range s.containers[n:] {
+			fmt.Printf("stopping %s...\n", c.name)
+			c.rmf(verbose)
 		}
 	}
 	return nil
 }
 
-func processLogs(name string, r io.Reader, ch chan<- string, cp *colorPicker) {
-	color := cp.next()
-	reset := cp.reset()
-
-	scanner := bufio.NewScanner(r)
-	for scanner.Scan() {
-		line := fmt.Sprintf(color+"%20s  | %s"+reset, name, scanner.Text())
-		ch <- line
+func (s *service) rmf(verbose bool) {
+	for _, c := range s.containers {
+		fmt.Printf("removing %s...\n", c.name)
+		c.rmf(verbose)
 	}
 }
 
