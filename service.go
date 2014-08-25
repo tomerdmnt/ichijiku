@@ -1,14 +1,23 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path"
 	"regexp"
 	"strings"
+	"sync"
+
+	"github.com/kballard/go-shellquote"
 )
+
+var colors []string = []string{"cyan", "yellow", "green", "magenta", "blue", "red"}
+var colori int = 0
+var colorMutex sync.Mutex = sync.Mutex{}
 
 type service struct {
 	name        string
@@ -30,7 +39,7 @@ func (s *service) init(name string) {
 		log.Fatal(err)
 	}
 	s.name = name
-	s.namespace = path.Base(dir)
+	s.namespace = strings.Replace(path.Base(dir), "-", "", -1)
 	s.containerRe = regexp.MustCompile(fmt.Sprintf("%s_%s_\\d+", s.namespace, s.name))
 }
 
@@ -60,10 +69,11 @@ func (s *service) rm(verbose bool) error {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 	}
-	return cmd.Run()
+	cmd.Run()
+	return nil
 }
 
-func (s *service) runCmd(daemon, verbose bool) error {
+func (s *service) runCmd(logsCh chan<- string, cp *colorPicker, daemon, verbose bool) error {
 	name := fmt.Sprintf("%s_%s_%d", s.namespace, s.name, 1)
 	args := []string{"run"}
 	if daemon {
@@ -84,17 +94,78 @@ func (s *service) runCmd(daemon, verbose bool) error {
 	} else {
 		args = append(args, s.Image)
 	}
+	words, err := shellquote.Split(s.Command)
+	if err != nil {
+		return err
+	}
+	args = append(args, words...)
+
 	cmd := exec.Command("docker", args...)
+	if !daemon {
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return err
+		}
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			return err
+		}
+		stdouterr := io.MultiReader(stdout, stderr)
+		go processLogs(name, stdouterr, logsCh, cp)
+	}
 	if verbose {
 		fmt.Printf("%s\n", strings.Trim(fmt.Sprint(cmd.Args), "[]"))
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		if daemon {
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+		}
 	}
-	if !daemon {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return err
 	}
-	return cmd.Run()
+	return nil
+}
+
+func (s *service) logs(ch chan<- string, cp *colorPicker, verbose bool) error {
+	containers := make(chan container)
+	ps(containers)
+
+	for c := range containers {
+		if s.matchContainer(c.name) {
+			cmd := exec.Command("docker", "logs", "-t", "-f", c.name)
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				// TODO: cancel goroutine
+				return err
+			}
+			stderr, err := cmd.StderrPipe()
+			if err != nil {
+				// TODO: cancel goroutine
+				return err
+			}
+			if verbose {
+				fmt.Printf("%s\n", strings.Trim(fmt.Sprint(cmd.Args), "[]"))
+			}
+			if err := cmd.Start(); err != nil {
+				return err
+			}
+
+			stdouterr := io.MultiReader(stdout, stderr)
+			go processLogs(c.name, stdouterr, ch, cp)
+		}
+	}
+	return nil
+}
+
+func processLogs(name string, r io.Reader, ch chan<- string, cp *colorPicker) {
+	color := cp.next()
+	reset := cp.reset()
+
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := fmt.Sprintf(color+"%20s  | %s"+reset, name, scanner.Text())
+		ch <- line
+	}
 }
 
 // returns true if container belongs to this service
