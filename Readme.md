@@ -14,7 +14,8 @@ Uses the docker command line client instead of the docker remote api in order to
 [binaries](http://github.com/tomerdmnt/ichijiku/releases)
 
 ## Usage
-```bash
+
+```
  $ ichijiku -h
 
 NAME:
@@ -44,6 +45,12 @@ GLOBAL OPTIONS:
    --help, -h			show help
    --generate-bash-completion	
    --version, -v		print the version
+```
+
+use -V/--verbose to see all docker commands that are run
+
+```bash
+ $ ichijiku -V run -d
 ```
    
 ## fig.yml
