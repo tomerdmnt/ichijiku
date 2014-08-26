@@ -127,7 +127,7 @@ func processLogs(name string, r io.Reader, ch chan<- string, cp *colorPicker) {
 
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
-		line := fmt.Sprintf(color+"%15s  | %s"+reset, name, scanner.Text())
+		line := fmt.Sprintf("%s%15s |%s %s", color, name, reset, scanner.Text())
 		ch <- line
 	}
 }
